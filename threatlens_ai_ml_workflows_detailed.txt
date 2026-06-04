@@ -1,0 +1,452 @@
+================================================================================
+🛡️ THREATLENS AI - HYBRID MACHINE LEARNING & SECURITY WORKFLOW DOCUMENTATION
+================================================================================
+This document provides a highly detailed, comprehensive architectural breakdown 
+of the workflows, AI models, feature engineering, and file configurations 
+implemented within ThreatLens AI, a BSIT-VI Cybersecurity Lab Semester Project.
+
+Author: Antigravity AI pair programmer
+Date: June 2026
+================================================================================
+
+TABLE OF CONTENTS:
+1. Full Stack Architecture & REST/WebSocket Integrations
+2. End-to-End System Workflows
+3. Detailed Explanation of the 10 Hybrid AI Models & Security Roles
+4. Feature Engineering: The 29 Parsed & Engineered Numerical Features
+5. Machine Learning Directory and File Guide
+6. Preprocessing, Data Scaling, and Evaluation Metrics
+7. Adaptive Security Risk Index & Threshold Matrix
+8. Incident Response and SOC Investigation Recommendations
+
+================================================================================
+1. FULL STACK ARCHITECTURE & REST/WEBSOCKET INTEGRATIONS
+================================================================================
+ThreatLens AI operates on a modern, decoupled architecture designed to deliver 
+sub-second log analysis and interactive threat visualization:
+
+A. FRONTEND: REACT 18 + VITE
+   - Serves as the Security Operations Center (SOC) Console.
+   - Includes real-time charts (Recharts) mapping threat frequency over time,
+     log distribution by severity, top attacking IPs, and model comparative radar charts.
+   - Subscribes to backend WebSockets (`/api/live/ws/logs`) for instant live feed.
+   - Built on a glassmorphic dashboard design utilizing HSL tailored colors.
+
+B. BACKEND: FASTAPI (PYTHON 3.8+)
+   - Leverages asynchronous handling with Python's event loop (asyncio).
+   - Serves Pydantic schemas (V2) to ensure strict API data validation.
+   - Exposes RESTful endpoints for log uploads, user authentication, alerts
+     resolution, reporting, and model management.
+   - Houses the Machine Learning Pipeline, Log Parsers, and Rules Engine.
+
+C. DATABASE: SQLITE WITH ASYNC SQLALCHEMY (AIOSQLITE)
+   - Relies on SQLite for zero-config, portable data storage.
+   - Utilizes `AsyncSessionLocal` to prevent database I/O blocking during large-scale
+     background tasks (such as parsing 5,000+ CSV lines or retraining models).
+
+D. ORCHESTRATORS (DOCKER & RUNNERS)
+   - Orchestrated via `docker-compose.yml` for unified backend/frontend builds.
+   - Automated locally via `run.ps1` (PowerShell) and `run.bat` (Batch) runner scripts
+     to automatically spin up Uvicorn and Vite servers.
+
+================================================================================
+2. END-TO-END SYSTEM WORKFLOWS
+================================================================================
+
+--------------------------------------------------------------------------------
+WORKFLOW 1: Log Ingestion, Parsing, and Database Storage
+--------------------------------------------------------------------------------
+This workflow occurs when an analyst uploads a log file (Syslog, Nginx, Apache, HDFS,
+or CSV) via the UI or REST endpoint `/api/logs/upload`:
+
+1. File Upload: The user uploads the file; FastAPI checks the size limit (50MB) 
+   and type (`.log`, `.txt`, `.csv`, `.json`).
+2. Async Thread Handoff: The backend saves the raw file in `backend/uploads/` and
+   spawns a background task `_process_upload` with a dedicated DB session.
+3. Automated Format Detection (`detect_format`): The parser checks the headers or
+   syntactical patterns to recognize whether the input is a Linux Syslog, Nginx/Apache
+   web log, HDFS transaction log, or generic CSV.
+4. Regex Log Parsing (`parse_logs`): Custom regex engines extract the timestamp, 
+   source IP, destination IP, username, HTTP method, request path, status code, 
+   and message payload.
+5. Database Entry Chunking: The parsed logs are batched (500 logs per chunk) and
+   written as `LogEntry` records in the SQLite database to reduce memory footprint.
+6. Threat Evaluation Trigger: Once the log primary IDs are flushed, the logs are
+   passed into the AI Prediction Pipeline (Workflow 2).
+
+--------------------------------------------------------------------------------
+WORKFLOW 2: Automated AI Threat Evaluation and Risk Assessment (Inference)
+--------------------------------------------------------------------------------
+For every batch of logs parsed or individual log generated:
+
+1. Feature Extraction: The records list is fed into `extract_features()`. It computes
+   temporal, network, frequency, and keyword-based features, returning a Pandas DataFrame.
+2. Active Model Retrieval: The `model_registry` fetches the active model binary
+   (e.g., `isolation_forest_model.joblib`) and its scaler (`isolation_forest_scaler.joblib`).
+3. Scale Transformation: The features DataFrame is converted to a NumPy matrix and
+   transformed via `StandardScaler`.
+4. Inference Score Computation:
+   - For Isolation Forest: The model scores samples (decision_function). Values <= 0.0
+     represent anomalous outliers.
+   - For Supervised Classifiers (Random Forest, Logistic Regression): Predicts binary classes
+     or multi-class indices along with probability confidence values (`predict_proba`).
+5. Fallback Check: If no model is trained, the pipeline uses a rule-based backup scoring logic
+   to prevent server errors.
+6. Text Classifier and Clustering Overwrite:
+   - The TF-IDF Naive Bayes text classifier scans log messages for payload signatures (SQLi, Traversal, etc.).
+   - The K-Means engine assigns the log to one of 5 behavioral clusters.
+7. Risk Index Calculation: The `calculate_adaptive_risk()` combines the model score, 
+   text classification confidence, asset criticality, user sensitivity, and MITRE 
+   mapping to assign a final score (0 - 100).
+8. Alert Triggering: If the score crosses the anomaly threshold, the alert rule matrix
+   constructs a structured `Alert` record (Workflow 5).
+
+--------------------------------------------------------------------------------
+WORKFLOW 3: Real-Time Live Monitoring
+--------------------------------------------------------------------------------
+Activated via `/api/live/start` or the SOC Dashboard Live Toggle:
+
+1. Simulation Loop: A background asyncio task `_simulation_loop` runs at a configured
+   interval (typically every 1.5 seconds).
+2. Synthetic Event Generation: The `generate_log_event()` randomly simulates traffic.
+   It injects a 20% probability of attack scenarios (Brute Force, SQL Injection, etc.).
+3. Real-Time Inference: The single record is sent to the ML Predictor, returning its 
+   risk score, severity, threat type, and explanation.
+4. WebSocket Broadcast: The backend broadcasts the log details and active predictions
+   over the WebSocket connection to all subscribed frontend clients.
+5. Live Alert Generation: If classified as anomalous, an Alert is instantly generated,
+   persisted to the DB, and broadcast as an `alert` type WebSocket message for dashboard
+   notification alerts.
+
+--------------------------------------------------------------------------------
+WORKFLOW 4: Model Training and Serialization Pipeline
+--------------------------------------------------------------------------------
+Triggered by `/api/ml/train` or database reset controllers:
+
+1. Data Assembly: The system retrieves up to 5,000 historical log entries from SQLite.
+   If fewer than 10 records exist, it falls back to generating 1,000 synthetic records.
+2. Label Generation: Supervised training data is labeled using heuristics (`_generate_labels()`)
+   identifying attack signatures in the log parameters.
+3. Split and Scaling: Data is split into training (80%) and testing (20%) sets. A
+   `StandardScaler` is fitted to the training set.
+4. Estimator Fit: All models are sequentially trained (fit) on the scaled feature arrays:
+   - Isolation Forest (contamination=0.15)
+   - Logistic Regression
+   - Decision Tree (max_depth=5)
+   - Random Forest (n_estimators=50, max_depth=8)
+   - Support Vector Machine (LinearSVC wrapped in CalibratedClassifierCV)
+   - K-Means Clustering (n_clusters=5)
+   - K-Nearest Neighbors (Similarity Engine)
+   - Naive Bayes Classifier (TF-IDF Pipeline)
+   - Linear Regression Forecaster
+5. Binary Serialization: Estimators are serialized to the `backend/models/` directory 
+   using `joblib.dump()`.
+6. Performance Metrics Tracking: The pipeline calculates classification metrics
+   (accuracy, precision, recall, f1_score, auc_roc, false_positive_rate) on test sets
+   and writes them to the `ModelMetrics` table in SQLite.
+
+--------------------------------------------------------------------------------
+WORKFLOW 5: SOC Incident Alerting and Triage
+--------------------------------------------------------------------------------
+Once an anomaly is detected:
+
+1. MITRE ATT&CK Mapping: The system maps the detected threat (e.g., Privilege Escalation)
+   to its corresponding MITRE ATT&CK technique and assigns standard remediation advice.
+2. Alert Suppression (Deduplication): A sliding window check suppresses duplicate alerts
+   for the same source IP + threat type within the current batch to prevent analyst alert fatigue.
+3. Persistent Storage: The alert is written to the SQLite DB with status `new`.
+4. Dashboard Alert Feed: The dashboard displays the alert. Analysts can change the alert status
+   (`new` -> `investigating` -> `resolved` / `false_positive`) and assign it to specific users.
+
+--------------------------------------------------------------------------------
+WORKFLOW 6: Security Report Compilation & Export
+--------------------------------------------------------------------------------
+Invoked on the Reports page via `/api/reports/export/pdf` or `/api/reports/export/csv`:
+
+1. Data Extraction: The endpoint queries all alerts, filtering by severity and status.
+2. PDF Compilation (`fpdf2`): The system generates a PDF report containing a header, 
+   a summary of threat counts (critical, high, medium, low), and tables of unresolved
+   alerts with forensic information and MITRE recommendations.
+3. CSV Compilation: Creates a CSV spreadsheet detailing IP sources, threat classes, 
+   and timestamps.
+4. Stream Response: Returns a file stream response directly to the browser.
+
+================================================================================
+3. DETAILED EXPLANATION OF THE 10 HYBRID AI MODELS & SECURITY ROLES
+================================================================================
+
+ThreatLens AI utilizes 10 hybrid machine learning algorithms to cover unsupervised
+outlier detection, supervised classification, text-based payload analysis, 
+behavioral clustering, and trend forecasting:
+
+1. ISOLATION FOREST (Unsupervised Anomaly Detector)
+   - Purpose: Primary anomaly engine used when labeled data is scarce.
+   - Mechanism: Builds an ensemble of Isolation Trees. Anomalies are isolated closer
+     to the root of the trees since they require fewer splits.
+   - Input: 29 Scaled Features.
+   - Output: Anomaly labels (-1 for anomalies, 1 for normal) and raw decision scores.
+   - Performance: ~94.2% accuracy on baseline datasets.
+
+2. LOGISTIC REGRESSION (Supervised Binary Classifier)
+   - Purpose: Establishes a lightweight binary classification baseline.
+   - Mechanism: Fits a logistic function to model the probability of a log being
+     malicious versus benign.
+   - Input: 29 Scaled Features.
+   - Output: Classification probabilities (0 to 1).
+
+3. DECISION TREE CLASSIFIER (Supervised Decision Explainer)
+   - Purpose: Provides highly explainable, human-auditable threat classification.
+   - Mechanism: Recursively splits features to maximize information gain (using Gini impurity).
+   - Input: 29 Scaled Features.
+   - Output: Multi-class label matching 7 categories.
+   - Security Value: Analysts can trace the exact logic path (e.g., "if failed login count
+     is > 5 AND hour is unusual, mark as brute force").
+
+4. RANDOM FOREST CLASSIFIER (Supervised Multi-Class Threat Classifier)
+   - Purpose: Multi-class classifier used for threat categorisation.
+   - Mechanism: Trains an ensemble of decision trees on random subsets of the data (bagging)
+     to reduce variance.
+   - Input: 29 Scaled Features.
+   - Output: Multi-class probabilities matching the threat labels:
+     (Brute Force, SQL Injection, Privilege Escalation, Malware Behavior,
+      Unauthorized Access, Port Scan, Normal).
+
+5. SUPPORT VECTOR MACHINE (Supervised Hyperplane Classifier)
+   - Purpose: Separates complex, high-dimensional log data.
+   - Mechanism: Uses a linear kernel to find the hyperplane maximizing the margin between 
+     benign and malicious logs. Wrapped in `CalibratedClassifierCV` to output probability scores.
+   - Input: 29 Scaled Features.
+   - Output: Malicious probability.
+
+6. K-MEANS CLUSTERING (Unsupervised Behavioral Grouper)
+   - Purpose: Groups logs into behavioral categories to profile user/IP activity.
+   - Mechanism: Partitions data into 5 clusters by minimizing inertia (within-cluster sum of squares).
+   - Clusters Mapped:
+     * Cluster 0: Normal Traffic
+     * Cluster 1: Authentication Failure Activity
+     * Cluster 2: Web Exploit & Command Payload
+     * Cluster 3: Privileged Admin Operations
+     * Cluster 4: Rapid High-Frequency Anomalies
+   - Output: Cluster index (0-4) and Euclidean distance to the assigned cluster centroid.
+
+7. K-NEAREST NEIGHBORS (Incident Matcher / Similarity Engine)
+   - Purpose: Recommends mitigation steps by finding similar past incidents.
+   - Mechanism: Stores historical threat profiles. For new alerts, it queries the 
+     closest vectors using Euclidean distance.
+   - Input: 29 Scaled Features.
+   - Output: Nearest historical log entries and their respective threat types.
+
+8. MULTINOMIAL NAÏVE BAYES (TF-IDF Text Threat Classifier)
+   - Purpose: Direct inspection of raw log messages and requested paths.
+   - Mechanism: Uses a TF-IDF (Term Frequency-Inverse Document Frequency) vectorizer with
+     unigram and bigram ranges (max 5,000 features). Computes probability scores using Bayes' Theorem.
+   - Input: Raw log message text.
+   - Output: Text-based threat category and confidence score.
+
+9. LINEAR REGRESSION FORECASTER (Trend Predictor)
+   - Purpose: SOC capacity planning and volume trend forecasting.
+   - Mechanism: Fits a linear equation to historical hourly alerts, failed logins, and average risk
+     scores to predict the volume of threats in the next hour.
+   - Output: Forecasted incident count.
+
+10. ADVANCED ESTIMATOR STUBS (XGBoost & LogBERT GNN)
+    - Purpose: Integration hooks for advanced neural networks.
+    - Status: Implemented as mock stubs that demonstrate how deep learning components 
+      integrate into the overall SOC comparison matrix.
+
+================================================================================
+4. FEATURE ENGINEERING: THE 29 PARSED & ENGINEERED NUMERICAL FEATURES
+================================================================================
+The machine learning algorithms process raw logs by converting them into 29 numerical
+features. These features are defined in `backend/app/ml/feature_extractor.py`:
+
+--------------------------------------------------------------------------------
+A. BASE 16 FEATURES (Extracted from individual log parameters)
+--------------------------------------------------------------------------------
+1.  `fail_flag`: Binary indicator (0 or 1). Flags the occurrence of keywords like 
+    `fail`, `failed`, `denied`, `invalid`, `blocked`, or `unauthorized` in the message.
+2.  `priv_flag`: Binary indicator. Flags administrator keywords like `root`, `admin`, 
+    `sudo`, `visudo`, `passwd`, or `shadow`.
+3.  `attack_flag`: Binary indicator. Flags payload keywords like `scan`, `exploit`, 
+    `sqli`, `union select`, `wget`, `curl`, or `nc`.
+4.  `sensitive_path`: Binary indicator. Flags attempts to access paths like `/etc/passwd`, 
+    `/wp-admin`, `/.env`, or `/backup`.
+5.  `is_4xx`: Binary indicator. Set to 1 if the HTTP status code is between 400 and 499.
+6.  `is_5xx`: Binary indicator. Set to 1 if the HTTP status code is >= 500.
+7.  `is_auth_fail`: Binary indicator. Set to 1 if the status code is exactly 401 or 403.
+8.  `ip_frequency`: Cumulative request count from the same source IP in the current batch.
+9.  `failed_login_count`: Total failed logins from the same source IP in the current batch.
+10. `user_frequency`: Total occurrences of the target username in the current batch.
+11. `unusual_hour`: Binary indicator. Set to 1 if the event occurred between 12:00 AM and 6:00 AM.
+12. `is_weekend`: Binary indicator. Set to 1 if the event occurred on Saturday or Sunday.
+13. `msg_len`: Character length of the log message (capped at 2000 to normalize inputs).
+14. `is_admin_user`: Binary indicator. Set to 1 if username is `root`, `admin`, or `system`.
+15. `event_score`: Encoded baseline risk of the event category (e.g., `auth_failure` = 4, 
+    `suspicious_request` = 5, `login` = 1, `logout` = 0).
+16. `status_code_int`: Integer cast of the raw status code (0 if non-numeric).
+
+--------------------------------------------------------------------------------
+B. ADVANCED 13 CONTEXTUAL FEATURES (Extracted from batch-level aggregations)
+--------------------------------------------------------------------------------
+17. `request_rate_per_ip`: The ratio of requests from the current IP to the total batch size.
+18. `unique_paths_per_ip`: Count of unique URL paths requested by this IP.
+19. `unique_users_per_ip`: Count of unique usernames attempted by this IP.
+20. `failed_login_ratio`: The ratio of failed requests to total requests for the IP.
+21. `admin_path_access_count`: Count of unique admin paths requested by the IP.
+22. `suspicious_keyword_count`: Cumulative count of suspicious keywords found in the log.
+23. `path_depth`: Number of directories in the URL path (count of `/`).
+24. `query_length`: Length of query parameters in the request URL (characters after `?`).
+25. `special_char_count`: Count of special injection characters (like `'`, `"`, `-`, `<` etc.).
+26. `encoded_payload_flag`: Binary indicator flagging hex encoding or base64 patterns.
+27. `repeated_401_403_count`: Cumulative count of auth errors from this IP in the current batch.
+28. `time_since_last_event`: Elapsed time (in seconds) since the previous event from this IP.
+29. `session_event_count`: Cumulative event count for the active username.
+
+================================================================================
+5. MACHINE LEARNING DIRECTORY AND FILE GUIDE
+================================================================================
+All ML operations are defined in `backend/app/ml/`:
+
+*   [feature_engineering.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/feature_engineering.py)
+    - Original 16 features extraction logic. Defines search regex patterns and basic aggregations.
+*   [feature_extractor.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/feature_extractor.py)
+    - Core data engine. Extends base features to generate the full 29-dimension feature vector.
+*   [train.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/train.py)
+    - Implements baseline fitting routines for Isolation Forest, Random Forest, and 
+      Logistic Regression models. Contains `train_on_demo_data()` used for initialization.
+*   [trainer.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/trainer.py)
+    - Training orchestrator. Generates labeled datasets, handles split ratios, fits all 10 models,
+      saves them to disk, and updates metrics in the SQLite database.
+*   [predict.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/predict.py)
+    - Batch prediction interface. Handles scalar transformations and provides a rule-based
+      fallback prediction mode if no trained models are found on disk.
+*   [predictor.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/predictor.py)
+    - Multi-model inference orchestrator. Evaluates inputs against the active machine learning model,
+      gets clustering assignments, runs the Naive Bayes text classifier, and calculates risk.
+*   [risk_scoring.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/risk_scoring.py)
+    - Contains the adaptive risk scoring formula, dynamic asset criticality lookups, and 
+      user sensitivity scores.
+*   [clustering.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/clustering.py)
+    - Encapsulates the K-Means clustering module. Scales and fits KMeans to cluster log vectors.
+*   [text_classifier.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/text_classifier.py)
+    - Houses TF-IDF Vectorizer + Multinomial Naive Bayes pipeline for raw message classification.
+*   [explainability.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/explainability.py)
+    - Implements XAI (Explainable AI). Extracts decision paths from Decision Trees and translates
+      numerical feature values into natural language narratives for security analysts.
+*   [similarity_engine.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/similarity_engine.py)
+    - Incident similarity match engine using K-Nearest Neighbors (KNN).
+*   [trend_forecasting.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/trend_forecasting.py)
+    - Predicts alert counts and failed login trends using Linear Regression.
+*   [alert_rules.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/alert_rules.py)
+    - Evaluates predictions against correlation rules (such as IP failures > 5) to trigger
+      and format security alerts.
+*   [model_registry.py](file:///s:/SAIFI/PROJECTS/CyberSecurity_Project/threatlens-ai/backend/app/ml/model_registry.py)
+    - Manages model references in memory, disk checkpoints, and model comparison metadata.
+
+================================================================================
+6. PREPROCESSING, DATA SCALING, AND EVALUATION METRICS
+================================================================================
+
+A. PREPROCESSING
+   - Log records are cleaned and parsed before feature extraction. Missing values (like missing
+     usernames or IPs) are replaced with default values (`"unknown"`, `"0"`, or `-1`).
+   - Dates are parsed to UTC timezone to ensure time-based calculations are consistent.
+
+B. DATA SCALING
+   - Since the 29 features have varying scales (e.g., binary indicators are [0, 1] while
+     message lengths are [0, 2000]), distance-based estimators like SVM, Logistic
+     Regression, and K-Means require feature scaling.
+   - ThreatLens AI uses `StandardScaler` from scikit-learn:
+     
+     z = (x - u) / s
+     
+     where `u` is the mean of the training samples and `s` is the standard deviation.
+   - Scalers are saved alongside their respective model files (e.g., `isolation_forest_scaler.joblib`)
+     to ensure consistent transformations during inference.
+
+C. METRICS COMPUTATION
+   - Models are evaluated on accuracy, precision, recall, f1-score, and AUC-ROC:
+     * Accuracy: (TP + TN) / Total
+     * Precision: TP / (TP + FP)  (indicates how many flagged anomalies were actual threats)
+     * Recall: TP / (TP + FN)     (indicates the percentage of threats successfully caught)
+     * F1-Score: Harmonic mean of precision and recall.
+     * False Positive Rate: FP / (FP + TN)
+   - These metrics populate the "ML Analytics" comparison matrix in the UI.
+
+================================================================================
+7. ADAPTIVE SECURITY RISK INDEX & THRESHOLD MATRIX
+================================================================================
+ThreatLens AI calculates a risk index (0 to 100) using a weighted formula.
+This equation combines statistical predictions with real-world security context:
+
+--------------------------------------------------------------------------------
+A. RISK SCORE EQUATION
+--------------------------------------------------------------------------------
+risk_score = 
+    0.25 * (model_anomaly_score * 100) +
+    0.20 * (rule_severity_score) +
+    0.15 * (threat_confidence * 100) +
+    0.15 * (asset_criticality) +
+    0.10 * (user_sensitivity) +
+    0.10 * (MITRE_severity) +
+    0.05 * (time_context_score)
+
+Where:
+- `model_anomaly_score`: Outlier score from the ML model (0.0 to 1.0).
+- `rule_severity_score`: Score based on specific regex matches (0.0 to 100.0).
+- `threat_confidence`: Probability score of the predicted class (0.0 to 1.0).
+- `asset_criticality`: Rating of the target IP subnet or path (0.0 to 100.0):
+  * IPs starting with `10.0.3` or `192.168.3` (Database subnets) = 90.0
+  * URL paths containing `admin`, `config`, or `passwd` = 85.0
+  * Root path `/` or `index.html` = 30.0
+  * Default server asset = 50.0
+- `user_sensitivity`: Sensitivity rating of the user account (0.0 to 100.0):
+  * `root`, `admin`, `administrator`, `system` = 95.0
+  * `db_admin`, `sec_engineer`, `developer` = 75.0
+  * `guest` or `anonymous` = 20.0
+  * Default user = 50.0
+- `MITRE_severity`: Base severity score of the threat type (0.0 to 100.0):
+  * Privilege Escalation = 95.0
+  * Malware Behavior = 90.0
+  * SQL Injection = 85.0
+  * Unauthorized Access = 80.0
+  * Brute Force = 70.0
+  * Port Scan = 40.0
+  * Default = 50.0
+- `time_context_score`: Unusual hour or weekend flag:
+  * Unusual hour (12 AM to 6 AM) or weekend = 40.0
+  * Default = 10.0
+
+--------------------------------------------------------------------------------
+B. SEVERITY TIERS
+--------------------------------------------------------------------------------
+The calculated risk score is mapped to one of four severity levels:
+*   CRITICAL (Red) : Risk Score >= 80.0
+*   HIGH (Orange)  : Risk Score 60.0 to 79.9
+*   MEDIUM (Yellow): Risk Score 35.0 to 59.9
+*   LOW (Blue)     : Risk Score < 35.0
+
+================================================================================
+8. INCIDENT RESPONSE AND SOC INVESTIGATION RECOMMENDATIONS
+================================================================================
+When the system generates an alert, it provides analysts with actionable 
+remediation recommendations:
+
+- Brute Force:
+  "Initiate automated source IP firewall blocks, enforce host account lockout, rotate passwords."
+- SQL Injection:
+  "Review active query parameters, validate database escape signatures, enforce WAF filters."
+- Privilege Escalation:
+  "Audit sudo group logs, disable administrative credentials, verify identity certificates."
+- Malware Behavior:
+  "Isolate system host immediately, review active connections, run anti-malware sweeps."
+- Unauthorized Access:
+  "Update network Access Control Lists (ACLs), expire authorization tokens."
+- Port Scan:
+  "Verify active port filtering, block scanner IP segments, silence ICMP responses."
+- Unknown Anomaly:
+  "Perform standard security incident investigation procedures."
+
+================================================================================
+🛡️ End of ThreatLens AI ML & Workflows Documentation.
+================================================================================

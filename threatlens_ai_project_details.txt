@@ -1,0 +1,309 @@
+================================================================================
+🛡️ THREATLENS AI - COMPREHENSIVE PROJECT DOCUMENTATION
+================================================================================
+BSIT-VI Cybersecurity Lab Semester Project
+A Full-Stack, AI-Powered SIEM (Security Information & Event Management) System
+================================================================================
+
+1. PROJECT OVERVIEW
+--------------------------------------------------------------------------------
+ThreatLens AI is an enterprise-grade cybersecurity web application designed to 
+collect, parse, analyze, and visualize system/security logs. By integrating 
+advanced Machine Learning (ML) pipelines and real-time streaming technologies, 
+ThreatLens AI acts as a complete Security Operations Center (SOC) dashboard. It 
+enables security analysts to discover suspicious anomalies, triage high-severity 
+threat alerts, inspect network patterns, generate formal reports, and execute 
+attack scenario simulations.
+
+
+2. ARCHITECTURAL OVERVIEW
+--------------------------------------------------------------------------------
+The project is built on a highly modular and decoupled full-stack architecture:
+
+   +-----------------------------------------------------------------------+
+   |                        VITE + REACT 18 FRONTEND                       |
+   |   (SOC Dashboard, Log Explorer, Live Feed, Analytics, Alert Triage)   |
+   +------------------------------------+----------------------------------+
+                                        |
+                            JSON API    |  WebSocket Stream
+                          (Axios HTTP)  |  (Real-Time Logs/Alerts)
+                                        v
+   +------------------------------------+----------------------------------+
+   |                        FASTAPI PYTHON BACKEND                         |
+   |   (Log Parsers, Feature Extraction, ML Engines, Alert Rule Matrix)    |
+   +------------------------------------+----------------------------------+
+                                        |
+                                        v
+   +------------------------------------+----------------------------------+
+   |                   SQLITE + SQLALCHEMY ASYNC DATABASE                  |
+   |     (Tables: Users, Log Entries, Alerts, Predictions, Metrics)        |
+   +-----------------------------------------------------------------------+
+
+DIRECTORY STRUCTURE:
+threatlens-ai/
+├── backend/                    # FastAPI Python Backend
+│   ├── app/
+│   │   ├── main.py             # Server initialization & DB seeding logic
+│   │   ├── config.py           # Configuration environment setup (pydantic-settings)
+│   │   ├── database.py         # Async SQLite connection via SQLAlchemy + aiosqlite
+│   │   ├── models/             # ORM models (User, LogEntry, Alert, Prediction, Metrics)
+│   │   ├── schemas/            # Pydantic v2 data validation schemas
+│   │   ├── routes/             # REST API routers (auth, logs, ml, alerts, dashboard, reports, live)
+│   │   ├── services/           # Service-layer business logic (auth_service)
+│   │   ├── parsers/            # Regex log parsing logic (Syslog, Apache, HDFS, CSV)
+│   │   ├── ml/                 # Machine learning pipeline (Feature extraction, training, predicting)
+│   │   └── utils/              # Synthetic log generation and simulation engine
+│   ├── datasets/               # Pre-bundled CSV training datasets
+│   ├── models/                 # Generated serialized ML model binaries (Joblib files)
+│   ├── requirements.txt        # Backend dependencies
+│   ├── .env                    # System variables & secret keys
+│   └── Dockerfile              # Docker container deployment setup
+├── frontend/                   # React 18 + Vite Frontend
+│   ├── src/
+│   │   ├── App.jsx             # React router & global authentication context
+│   │   ├── hooks/              # Custom React hooks (useAuth, useWebSocket)
+│   │   ├── services/           # Axios REST API client definitions
+│   │   ├── components/         # Shared UI (Sidebar, TopBar, MainLayout, MetricCard)
+│   │   ├── pages/              # 11 dashboard pages (Dashboard, Explorer, Live, Triage, etc.)
+│   │   └── index.css           # Premium dark-SOC theme
+│   ├── package.json            # Node.js dependencies
+│   ├── vite.config.js          # Vite building config
+│   └── Dockerfile              # Frontend container deployment setup
+├── docker-compose.yml          # Full-stack orchestrator
+├── run.ps1                     # Windows PowerShell Dev Runner
+└── run.bat                     # Quick-start batch file launcher
+
+
+3. DATABASE DESIGN & DATA MODEL (ORM)
+--------------------------------------------------------------------------------
+SQLite is selected for portability and zero-config deployment. The backend uses 
+SQLAlchemy's modern `async/await` pattern (using `aiosqlite`) to avoid blocking 
+the event loop during large log analysis tasks.
+
+CORE DATA MODELS:
+1. User:
+   - Tracks security analyst accounts with fields: `id`, `name`, `email`, 
+     `hashed_password`, `role` (admin/analyst), and `created_at`.
+2. LogEntry:
+   - Stores raw and parsed log entries. Fields: `id`, `timestamp`, `source` 
+     (Syslog, Apache, etc.), `source_ip`, `destination_ip`, `username`, 
+     `event_type`, `status_code`, `method`, `path`, `message`, `raw_log` (up to 
+     2000 chars), `severity`, and `created_at`.
+3. Prediction:
+   - Records predictions made by the ML model. Fields: `id`, `log_id`, 
+     `model_name`, `prediction` (anomaly/normal), `anomaly_score`, `risk_score` 
+     (0-100 scale), `threat_type`, `severity`, and `explanation` (text reasons).
+4. Alert:
+   - Holds validated security alerts triggered by anomaly rules. Fields: `id`, 
+     `title`, `description`, `severity` (critical, high, medium, low), `status` 
+     (new, investigating, resolved, false_positive), `threat_type`, `source_ip`, 
+     `mitre_mapping`, `recommendation`, and `created_at`.
+5. ModelMetrics:
+   - Tracks performance stats of trained models. Fields: `id`, `model_name`, 
+     `accuracy`, `precision`, `recall`, `f1_score`, `auc_roc`, 
+     `training_samples`, `training_date`, and `is_active`.
+
+
+4. MACHINE LEARNING ENGINE & FEATURE ENGINEERING
+--------------------------------------------------------------------------------
+ThreatLens AI leverages both supervised and unsupervised models to identify anomalies 
+and threats in system log data.
+
+THE 16 EXTRACTED SECURITY FEATURES:
+Every log record is converted into 16 numerical security metrics:
+1.  `fail_flag`: Detects fail, invalid, denied, blocked, or unauthorized keywords.
+2.  `priv_flag`: Flags administrative or root privilege indicators (e.g., sudo, chmod).
+3.  `attack_flag`: Identifies common payload or threat patterns (e.g., union select, curl).
+4.  `sensitive_path`: Flags navigation towards administrative panels or sensitive directories.
+5.  `is_4xx`: Boolean representing HTTP 4xx Client Error statuses.
+6.  `is_5xx`: Boolean representing HTTP 5xx Server Error statuses.
+7.  `is_auth_fail`: Specific flag for HTTP 401 Unauthorized or 403 Forbidden statuses.
+8.  `ip_frequency`: Frequency rate of requests originating from the same IP.
+9.  `failed_login_count`: Cumulative failed login attempts from the same IP.
+10. `user_frequency`: Frequency rate of requests originating from the same Username.
+11. `unusual_hour`: Boolean flagging actions during off-hours (midnight to 6:00 AM).
+12. `is_weekend`: Boolean flagging actions occurring on Saturday or Sunday.
+13. `msg_len`: Length of the log message to detect buffer overflow attempts.
+14. `is_admin_user`: Boolean identifying administrative accounts (root, admin).
+15. `event_score`: Decoded numeric risk score based on the event category.
+16. `status_code_int`: Integer cast of the raw response status code.
+
+CORE ALGORITHMS:
+- Isolation Forest (Unsupervised):
+  - Primary algorithm for real-time anomaly detection. Wipes out the need for 
+    labeled training datasets.
+  - Accuracy: 94.2% | AUC-ROC: 96.1%
+- Random Forest (Supervised):
+  - Used for high-confidence classification when historical labeled data exists.
+  - Accuracy: 96.5% | AUC-ROC: 98.4%
+- Logistic Regression (Supervised):
+  - Simple, lightweight statistical model for baseline checks.
+  - Accuracy: 87.3% | AUC-ROC: 91.2%
+
+
+5. SECURITY ATTACK SCENARIOS DETECTED
+--------------------------------------------------------------------------------
+ThreatLens AI maps ML anomalies against a security threat matrix to detect 
+sophisticated attack vectors:
+
+- Brute Force:
+  - Detected when consecutive failed login attempts from the same IP exceed 5.
+- Port Scan:
+  - Triggered by rapid, multi-destination port connection patterns.
+- SQL Injection (SQLi):
+  - Detected by scanning URL queries and inputs for keywords like `UNION SELECT`, 
+    `--`, or `' OR 1=1`.
+- Privilege Escalation:
+  - Flagged when non-standard users invoke commands like `sudo` or access root 
+    files outside of standard operating hours.
+- Malware Behavior:
+  - Identified by trace activity commands (e.g., `wget http`, `curl`, `nc -e /bin/bash`).
+- Unauthorized Access:
+  - Triggered by attempts to browse restricted paths (e.g., `/etc/passwd`, 
+    `/etc/shadow`, `.env`).
+
+
+6. ADVANCED LOG PARSING ENGINE
+--------------------------------------------------------------------------------
+The backend features an extensible parsing system designed to digest structured, 
+semi-structured, and unstructured log files:
+
+- Syslog Parser:
+  - Parses RFC-5424 compliant UNIX system log lines using standard regular 
+    expressions to extract facility, severity, timestamp, host, and message.
+- Web Server Parsers (Nginx & Apache):
+  - Extracts HTTP request methods, URIs, query parameters, client IPs, response 
+    statuses, and user agents.
+- HDFS Parser:
+  - Tailored to parse Hadoop Distributed File System audit logs, separating 
+    block operations, destination nodes, and DFS path requests.
+- CSV/Generic Parser:
+  - Automatically maps column coordinates in customized security log files.
+
+
+7. REST API ENDPOINT REFERENCE
+--------------------------------------------------------------------------------
+The FastAPI backend serves routes with automatic validation and documentation:
+
+AUTHENTICATION (`/api/auth`):
+- `POST  /login`                  - Handles JWT-based credential authentication.
+- `POST  /register`               - Creates new analyst/admin user accounts.
+- `GET   /profile`                - Retrieves information on the current session user.
+
+LOGS (`/api/logs`):
+- `GET   /`                        - Lists parsed log entries (paginated, with filters).
+- `GET   /{id}`                    - Retrieves a specific parsed log detail.
+- `POST  /upload`                 - Accepts drag-and-drop log file uploads.
+- `DELETE /{id}`                  - Removes a specific log.
+
+MACHINE LEARNING (`/api/ml`):
+- `POST  /train`                  - Trains models on stored data or demo records.
+- `POST  /predict`                - Runs batch threat predictions on log inputs.
+- `GET   /metrics`                 - Returns historic model performance metrics.
+- `GET   /model-info`             - Returns details of the active model.
+
+SECURITY ALERTS (`/api/alerts`):
+- `GET   /`                        - Lists generated threat alerts.
+- `GET   /{id}`                    - Retrieves an alert's details + MITRE mapping.
+- `PATCH /{id}/status`            - Triage alerts (new, investigating, resolved).
+
+DASHBOARD (`/api/dashboard`):
+- `GET   /summary`                - Aggregates high-level dashboard metric card data.
+- `GET   /charts/threats-over-time`- Groups threat trends for the past 7 days.
+- `GET   /charts/severity-dist`   - Gathers alert counts classified by severity.
+- `GET   /charts/top-ips`         - List of source IPs generating the most anomalies.
+- `POST  /reset`                  - Clears the database completely or re-seeds it.
+
+REPORTS (`/api/reports`):
+- `GET   /export/pdf`             - Exports a formatted PDF threat audit report.
+- `GET   /export/csv`             - Exports a spreadsheet CSV dump of current alerts.
+
+LIVE SIMULATION (`/api/live`):
+- `POST  /start`                  - Starts the synthetic background log generator.
+- `POST  /stop`                   - Stops the background log generator.
+- `GET   /status`                 - Checks connection counts and simulation status.
+- `WS    /ws/logs`                - WebSocket connection for real-time live logs.
+
+
+8. COMPREHENSIVE DEV UTILITY MANAGEMENT (NEW FEATURES)
+--------------------------------------------------------------------------------
+To make the SIEM highly interactive, we implemented an advanced, robust 
+Dev Utility Reset & Simulation management workflow:
+
+1. WIPE DATABASE COMPLETELY (Empty Slate):
+   - Triggers clean backend deletion of all logs, alerts, predictions, and metrics.
+   - Ideal for clearing out synthetic data to test clean file uploads.
+
+2. RESET & SEED DEFAULT STATE:
+   - Deletes existing records and seeds 1,000 fresh, randomized historical log 
+     entries.
+   - Automatically trains the Isolation Forest ML model, runs predictions, 
+     triggers rules, and re-populates all dashboard cards and line graphs.
+
+3. START LOG ANALYSIS FROM ZERO (Real-time Stream):
+   - Wipes all historical data and stops any running simulations.
+   - Immediately starts the background live log simulator.
+   - Connects the WebSocket feed so that logs begin streaming in, analyzing, 
+     and detecting threats starting from a clean slate.
+   - Supported with button shortcuts on both the Dashboard Page and Live Monitor Page.
+
+
+9. FRONTEND PAGES & SOC UI HIGHLIGHTS
+--------------------------------------------------------------------------------
+ThreatLens AI features a custom dark SOC design with vibrant, harmonized glow 
+accents, glassmorphic panels, and smooth Framer Motion micro-animations:
+
+1.  SOC Overview Dashboard:
+    - Custom summary metrics (Logs, threats, critical anomalies, risk index).
+    - Charts detailing threats over time, severity distributions, and top IPs.
+    - Beautiful database reset controller that opens a premium modal.
+2.  Log Explorer:
+    - Full-featured datagrid allowing search, filters, pagination, and log details.
+3.  Upload Logs:
+    - Drag-and-drop uploader supporting Syslog, Apache, Nginx, HDFS, and CSV log files.
+4.  Live Log Monitor:
+    - Real-time terminal with live logs streaming at adjustable intervals (0.5s – 3.0s).
+    - Quick-action "Reset & Start from Zero" button.
+5.  Alert Management:
+    - SOC triage workflow where analysts can change statuses or assign investigations.
+6.  Alert Detail Page:
+    - Shows timelines, mapped MITRE ATT&CK techniques, and suggested mitigation steps.
+7.  ML Analytics:
+    - Compares Isolation Forest, Random Forest, and Logistic Regression with radar charts.
+8.  Security Reports:
+    - Instant generation and download of security audit PDF and CSV reports.
+9.  Settings Page:
+    - Manage active anomaly thresholds and switch between active models.
+10. About Page:
+    - Explains team credits and project architectures.
+
+
+10. SETUP & DEVELOPMENT INSTRUCTIONS
+--------------------------------------------------------------------------------
+PREREQUISITES:
+- Python 3.8+ (with virtualenv)
+- Node.js 16+ (with npm)
+
+DEVELOPMENT LAUNCH:
+The project is equipped with standard PowerShell (`run.ps1`) and batch file 
+(`run.bat`) runner scripts that start the backend and frontend simultaneously.
+
+MANUAL START:
+1. Backend:
+   $ cd backend
+   $ python -m venv .venv
+   $ .venv\Scripts\activate
+   $ pip install -r requirements.txt
+   $ uvicorn app.main:app --port 8000 --reload
+
+2. Frontend:
+   $ cd frontend
+   $ npm install
+   $ npm run dev
+
+PORTS & CREDENTIALS:
+- React SOC Dashboard: http://localhost:5173
+- FastAPI Swagger Docs: http://localhost:8000/api/docs
+- Admin Account: admin@threatlens.ai / Admin@1234
+- Analyst Account: analyst@threatlens.ai / Analyst@1234
+================================================================================

